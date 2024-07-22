@@ -1,5 +1,7 @@
 #include "qcc5181.h"
 #include "dsp_lib.h"
+#include <stdio.h>
+#include "onnxruntime_c_api.h"
 
 #define SAMPLE_RATE 16000
 #define FFT_SIZE 320
@@ -61,4 +63,81 @@ float* calculate_logpowspec(float* audio, int len) {
 
     free(fft_results);
     return powspec;
+}
+
+
+// Define paths to the ONNX model and input data
+const char* model_path = "path_to_model.onnx";
+const ORTCHAR_T* input_node_names[] = {"input_node"};
+const ORTCHAR_T* output_node_names[] = {"output_node"};
+
+int main() {
+    OrtEnv* env;
+    OrtSession* session;
+    OrtSessionOptions* session_options;
+
+    // Initialize environment
+    if (OrtCreateEnv(ORT_LOGGING_LEVEL_WARNING, "test", &env) != NULL) {
+        printf("Failed to create ONNX runtime environment\n");
+        return -1;
+    }
+
+    // Create session options
+    if (OrtCreateSessionOptions(&session_options) != NULL) {
+        OrtReleaseEnv(env);
+        printf("Failed to create session options\n");
+        return -1;
+    }
+
+    // Create session
+    if (OrtCreateSession(env, model_path, session_options, &session) != NULL) {
+        OrtReleaseSessionOptions(session_options);
+        OrtReleaseEnv(env);
+        printf("Failed to create session\n");
+        return -1;
+    }
+
+    // Prepare input tensor
+    size_t input_tensor_size = 128;  // Adjust according to your model's expected input
+    float* input_tensor_values = (float*)malloc(input_tensor_size * sizeof(float));
+    for (int i = 0; i < input_tensor_size; i++) {
+        input_tensor_values[i] = (float)i;  // Dummy data; replace with actual data
+    }
+
+    // Specify input tensor shape and data
+    OrtAllocator* allocator;
+    OrtCreateDefaultAllocator(&allocator);
+    int64_t input_shape[] = {1, 128};
+    OrtValue* input_tensor = NULL;
+    if (OrtCreateTensorWithDataAsOrtValue(allocator, input_tensor_values, input_tensor_size * sizeof(float), input_shape, 2, ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &input_tensor) != NULL) {
+        printf("Failed to create input tensor\n");
+        free(input_tensor_values);
+        OrtReleaseAllocator(allocator);
+        OrtReleaseSession(session);
+        OrtReleaseSessionOptions(session_options);
+        OrtReleaseEnv(env);
+        return -1;
+    }
+
+    // Run model
+    OrtValue* output_tensor = NULL;
+    if (OrtRun(session, NULL, input_node_names, (const OrtValue* const*)&input_tensor, 1, output_node_names, 1, &output_tensor) != NULL) {
+        printf("Failed to run model\n");
+    }
+
+    // Retrieve and print the output
+    float* output_array;
+    OrtGetTensorMutableData(output_tensor, (void**)&output_array);
+    printf("Model output: %f\n", output_array[0]);
+
+    // Clean up
+    OrtReleaseValue(output_tensor);
+    OrtReleaseValue(input_tensor);
+    free(input_tensor_values);
+    OrtReleaseAllocator(allocator);
+    OrtReleaseSession(session);
+    OrtReleaseSessionOptions(session_options);
+    OrtReleaseEnv(env);
+
+    return 0;
 }
